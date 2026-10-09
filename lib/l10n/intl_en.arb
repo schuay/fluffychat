@@ -2852,5 +2852,12 @@
                 "type": "String"
             }
         }
-    }
+    },
+    "nameForYou": "Name for you",
+    "personalNameDescription": "This name is for your account and syncs across your devices. Simultaneous edits can overwrite each other.",
+    "personalNameUnset": "Not set",
+    "resetPersonalName": "Reset name",
+    "personalNameEmpty": "Enter a name.",
+    "personalNamePending": "Waiting for the name to sync...",
+    "personalNameRoomName": "Room name"
 }

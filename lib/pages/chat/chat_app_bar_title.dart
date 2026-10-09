@@ -8,9 +8,11 @@ import 'package:fluffychat/l10n/l10n.dart';
 import 'package:fluffychat/pages/chat/chat.dart';
 import 'package:fluffychat/utils/date_time_extension.dart';
 import 'package:fluffychat/utils/matrix_sdk_extensions/matrix_locals.dart';
+import 'package:fluffychat/utils/personal_room_name.dart';
 import 'package:fluffychat/utils/sync_status_localization.dart';
 import 'package:fluffychat/utils/verified_room_extension.dart';
 import 'package:fluffychat/widgets/avatar.dart';
+import 'package:fluffychat/widgets/personal_room_name_builder.dart';
 import 'package:fluffychat/widgets/presence_builder.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
@@ -31,150 +33,156 @@ class ChatAppBarTitle extends StatelessWidget {
         ),
       );
     }
-    return InkWell(
-      hoverColor: Colors.transparent,
-      splashColor: Colors.transparent,
-      highlightColor: Colors.transparent,
-      onTap: controller.room.membership != .join
-          ? null
-          : () => FluffyThemes.isThreeColumnMode(context)
-                ? controller.toggleDisplayChatDetailsColumn()
-                : context.go('/rooms/${room.id}/details'),
-      child: Row(
-        children: [
-          Hero(
-            tag: 'content_banner',
-            child: Avatar(
-              mxContent: room.avatar,
-              name: room.getLocalizedDisplayname(
-                MatrixLocals(L10n.of(context)),
+    return PersonalRoomNameBuilder(
+      room: room,
+      builder: (context) => InkWell(
+        hoverColor: Colors.transparent,
+        splashColor: Colors.transparent,
+        highlightColor: Colors.transparent,
+        onTap: controller.room.membership != .join
+            ? null
+            : () => FluffyThemes.isThreeColumnMode(context)
+                  ? controller.toggleDisplayChatDetailsColumn()
+                  : context.go('/rooms/${room.id}/details'),
+        child: Row(
+          children: [
+            Hero(
+              tag: 'content_banner',
+              child: Avatar(
+                mxContent: room.avatar,
+                name: room.getEffectiveDisplayname(
+                  MatrixLocals(L10n.of(context)),
+                ),
+                size: 32,
               ),
-              size: 32,
             ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              mainAxisSize: .min,
-              crossAxisAlignment: .start,
-              children: [
-                Row(
-                  spacing: 4,
-                  children: [
-                    if (room.allUsersVerified)
-                      Icon(
-                        Icons.verified,
-                        color: Theme.of(context).colorScheme.primary,
-                        size: 16,
-                      ),
-                    Expanded(
-                      child: Text(
-                        room.getLocalizedDisplayname(
-                          MatrixLocals(L10n.of(context)),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                mainAxisSize: .min,
+                crossAxisAlignment: .start,
+                children: [
+                  Row(
+                    spacing: 4,
+                    children: [
+                      if (room.allUsersVerified)
+                        Icon(
+                          Icons.verified,
+                          color: Theme.of(context).colorScheme.primary,
+                          size: 16,
                         ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 16),
+                      Expanded(
+                        child: Text(
+                          room.getEffectiveDisplayname(
+                            MatrixLocals(L10n.of(context)),
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 16),
+                        ),
                       ),
-                    ),
-                  ],
-                ),
-                StreamBuilder(
-                  stream: room.client.onSyncStatus.stream,
-                  builder: (context, snapshot) {
-                    final status =
-                        room.client.onSyncStatus.value ??
-                        const SyncStatusUpdate(SyncStatus.waitingForResponse);
-                    final hide =
-                        FluffyThemes.isColumnMode(context) ||
-                        (room.client.onSync.value != null &&
-                            status.status != SyncStatus.error &&
-                            room.client.prevBatch != null);
-                    final style = TextStyle(fontSize: 11);
-                    return AnimatedSize(
-                      duration: FluffyThemes.animationDuration,
-                      child: hide
-                          ? room.isDirectChat
-                                ? PresenceBuilder(
-                                    userId: room.directChatMatrixID,
-                                    builder: (context, presence) {
-                                      final statusMessage = presence?.statusMsg
-                                          ?.trim();
+                    ],
+                  ),
+                  StreamBuilder(
+                    stream: room.client.onSyncStatus.stream,
+                    builder: (context, snapshot) {
+                      final status =
+                          room.client.onSyncStatus.value ??
+                          const SyncStatusUpdate(SyncStatus.waitingForResponse);
+                      final hide =
+                          FluffyThemes.isColumnMode(context) ||
+                          (room.client.onSync.value != null &&
+                              status.status != SyncStatus.error &&
+                              room.client.prevBatch != null);
+                      final style = TextStyle(fontSize: 11);
+                      return AnimatedSize(
+                        duration: FluffyThemes.animationDuration,
+                        child: hide
+                            ? room.isDirectChat
+                                  ? PresenceBuilder(
+                                      userId: room.directChatMatrixID,
+                                      builder: (context, presence) {
+                                        final statusMessage = presence
+                                            ?.statusMsg
+                                            ?.trim();
 
-                                      final lastActiveTimestamp =
-                                          presence?.lastActiveTimestamp;
+                                        final lastActiveTimestamp =
+                                            presence?.lastActiveTimestamp;
 
-                                      final texts = [
-                                        if (presence?.currentlyActive == true)
-                                          L10n.of(context).currentlyActive
-                                        else if (lastActiveTimestamp != null)
-                                          L10n.of(context).lastActiveAgo(
-                                            lastActiveTimestamp
-                                                .localizedTimeShort(context),
-                                          ),
-                                        ?statusMessage,
-                                      ];
-                                      final text = texts.join(' ◦ ');
-                                      if (text.isEmpty) {
-                                        return const SizedBox.shrink();
-                                      }
+                                        final texts = [
+                                          if (presence?.currentlyActive == true)
+                                            L10n.of(context).currentlyActive
+                                          else if (lastActiveTimestamp != null)
+                                            L10n.of(context).lastActiveAgo(
+                                              lastActiveTimestamp
+                                                  .localizedTimeShort(context),
+                                            ),
+                                          ?statusMessage,
+                                        ];
+                                        final text = texts.join(' ◦ ');
+                                        if (text.isEmpty) {
+                                          return const SizedBox.shrink();
+                                        }
 
-                                      return Text(text, style: style);
-                                    },
-                                  )
-                                : Row(
-                                    children: [
-                                      if (room.summary.mJoinedMemberCount !=
-                                          null)
-                                        Text(
-                                          L10n.of(context).countParticipants(
-                                            (room.summary.mJoinedMemberCount ??
-                                                    1) +
-                                                (room
-                                                        .summary
-                                                        .mInvitedMemberCount ??
-                                                    0),
-                                          ),
-                                          maxLines: 1,
-                                          style: style,
-                                        ),
-                                      if (room.topic.isNotEmpty) ...[
-                                        Text(' ◦ ', style: style),
-                                        Expanded(
-                                          child: Text(
-                                            room.topic,
-                                            style: style,
+                                        return Text(text, style: style);
+                                      },
+                                    )
+                                  : Row(
+                                      children: [
+                                        if (room.summary.mJoinedMemberCount !=
+                                            null)
+                                          Text(
+                                            L10n.of(context).countParticipants(
+                                              (room
+                                                          .summary
+                                                          .mJoinedMemberCount ??
+                                                      1) +
+                                                  (room
+                                                          .summary
+                                                          .mInvitedMemberCount ??
+                                                      0),
+                                            ),
                                             maxLines: 1,
+                                            style: style,
                                           ),
-                                        ),
+                                        if (room.topic.isNotEmpty) ...[
+                                          Text(' ◦ ', style: style),
+                                          Expanded(
+                                            child: Text(
+                                              room.topic,
+                                              style: style,
+                                              maxLines: 1,
+                                            ),
+                                          ),
+                                        ],
                                       ],
-                                    ],
-                                  )
-                          : Row(
-                              children: [
-                                SizedBox.square(
-                                  dimension: 10,
-                                  child: CircularProgressIndicator.adaptive(
-                                    strokeWidth: 1,
-                                    value: status.progress,
+                                    )
+                            : Row(
+                                children: [
+                                  SizedBox.square(
+                                    dimension: 10,
+                                    child: CircularProgressIndicator.adaptive(
+                                      strokeWidth: 1,
+                                      value: status.progress,
+                                    ),
                                   ),
-                                ),
-                                const SizedBox(width: 4),
-                                Expanded(
-                                  child: Text(
-                                    status.calcLocalizedString(context),
-                                    style: TextStyle(fontSize: 12),
+                                  const SizedBox(width: 4),
+                                  Expanded(
+                                    child: Text(
+                                      status.calcLocalizedString(context),
+                                      style: TextStyle(fontSize: 12),
+                                    ),
                                   ),
-                                ),
-                              ],
-                            ),
-                    );
-                  },
-                ),
-              ],
+                                ],
+                              ),
+                      );
+                    },
+                  ),
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

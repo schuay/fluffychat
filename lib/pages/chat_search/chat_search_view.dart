@@ -10,7 +10,9 @@ import 'package:fluffychat/pages/chat_search/chat_search_images_tab.dart';
 import 'package:fluffychat/pages/chat_search/chat_search_message_tab.dart';
 import 'package:fluffychat/pages/chat_search/chat_search_page.dart';
 import 'package:fluffychat/utils/matrix_sdk_extensions/matrix_locals.dart';
+import 'package:fluffychat/utils/personal_room_name.dart';
 import 'package:fluffychat/widgets/layouts/max_width_body.dart';
+import 'package:fluffychat/widgets/personal_room_name_builder.dart';
 import 'package:material_ui/material_ui.dart';
 
 class ChatSearchView extends StatelessWidget {
@@ -35,86 +37,89 @@ class ChatSearchView extends StatelessWidget {
 
     final theme = Theme.of(context);
 
-    return Scaffold(
-      appBar: AppBar(
-        leading: const Center(child: BackButton()),
-        titleSpacing: 0,
-        title: Text(
-          L10n.of(context).searchIn(
-            room.getLocalizedDisplayname(MatrixLocals(L10n.of(context))),
+    return PersonalRoomNameBuilder(
+      room: room,
+      builder: (context) => Scaffold(
+        appBar: AppBar(
+          leading: const Center(child: BackButton()),
+          titleSpacing: 0,
+          title: Text(
+            L10n.of(context).searchIn(
+              room.getEffectiveDisplayname(MatrixLocals(L10n.of(context))),
+            ),
           ),
         ),
-      ),
-      body: MaxWidthBody(
-        withScrolling: false,
-        child: Column(
-          children: [
-            if (FluffyThemes.isThreeColumnMode(context))
-              const SizedBox(height: 16),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: TextField(
-                controller: controller.searchController,
-                onSubmitted: (_) => controller.restartSearch(),
-                autofocus: true,
-                enabled: controller.tabController.index == 0,
-                decoration: InputDecoration(
-                  hintText: L10n.of(context).search,
-                  prefixIcon: const Icon(Icons.search_outlined),
-                  filled: true,
-                  fillColor: theme.colorScheme.secondaryContainer,
-                  border: OutlineInputBorder(
-                    borderSide: BorderSide.none,
-                    borderRadius: BorderRadius.circular(99),
-                  ),
-                  hintStyle: TextStyle(
-                    color: theme.colorScheme.onPrimaryContainer,
-                    fontWeight: FontWeight.normal,
+        body: MaxWidthBody(
+          withScrolling: false,
+          child: Column(
+            children: [
+              if (FluffyThemes.isThreeColumnMode(context))
+                const SizedBox(height: 16),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: TextField(
+                  controller: controller.searchController,
+                  onSubmitted: (_) => controller.restartSearch(),
+                  autofocus: true,
+                  enabled: controller.tabController.index == 0,
+                  decoration: InputDecoration(
+                    hintText: L10n.of(context).search,
+                    prefixIcon: const Icon(Icons.search_outlined),
+                    filled: true,
+                    fillColor: theme.colorScheme.secondaryContainer,
+                    border: OutlineInputBorder(
+                      borderSide: BorderSide.none,
+                      borderRadius: BorderRadius.circular(99),
+                    ),
+                    hintStyle: TextStyle(
+                      color: theme.colorScheme.onPrimaryContainer,
+                      fontWeight: FontWeight.normal,
+                    ),
                   ),
                 ),
               ),
-            ),
-            TabBar(
-              controller: controller.tabController,
-              tabs: [
-                Tab(child: Text(L10n.of(context).messages)),
-                Tab(child: Text(L10n.of(context).gallery)),
-                Tab(child: Text(L10n.of(context).files)),
-              ],
-            ),
-            Expanded(
-              child: TabBarView(
+              TabBar(
                 controller: controller.tabController,
-                children: [
-                  ChatSearchMessageTab(
-                    searchQuery: controller.searchController.text,
-                    room: room,
-                    onStartSearch: controller.startSearch,
-                    events: controller.messages,
-                    endReached: controller.messagesEndReached,
-                    isLoading: controller.isLoading,
-                    searchedUntil: controller.searchedUntil,
-                  ),
-                  ChatSearchImagesTab(
-                    room: room,
-                    onStartSearch: controller.startSearch,
-                    events: controller.images,
-                    endReached: controller.imagesEndReached,
-                    isLoading: controller.isLoading,
-                    searchedUntil: controller.searchedUntil,
-                  ),
-                  ChatSearchFilesTab(
-                    room: room,
-                    onStartSearch: controller.startSearch,
-                    events: controller.files,
-                    endReached: controller.filesEndReached,
-                    isLoading: controller.isLoading,
-                    searchedUntil: controller.searchedUntil,
-                  ),
+                tabs: [
+                  Tab(child: Text(L10n.of(context).messages)),
+                  Tab(child: Text(L10n.of(context).gallery)),
+                  Tab(child: Text(L10n.of(context).files)),
                 ],
               ),
-            ),
-          ],
+              Expanded(
+                child: TabBarView(
+                  controller: controller.tabController,
+                  children: [
+                    ChatSearchMessageTab(
+                      searchQuery: controller.searchController.text,
+                      room: room,
+                      onStartSearch: controller.startSearch,
+                      events: controller.messages,
+                      endReached: controller.messagesEndReached,
+                      isLoading: controller.isLoading,
+                      searchedUntil: controller.searchedUntil,
+                    ),
+                    ChatSearchImagesTab(
+                      room: room,
+                      onStartSearch: controller.startSearch,
+                      events: controller.images,
+                      endReached: controller.imagesEndReached,
+                      isLoading: controller.isLoading,
+                      searchedUntil: controller.searchedUntil,
+                    ),
+                    ChatSearchFilesTab(
+                      room: room,
+                      onStartSearch: controller.startSearch,
+                      events: controller.files,
+                      endReached: controller.filesEndReached,
+                      isLoading: controller.isLoading,
+                      searchedUntil: controller.searchedUntil,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

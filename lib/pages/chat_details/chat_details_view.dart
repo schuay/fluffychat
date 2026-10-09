@@ -9,6 +9,7 @@ import 'package:fluffychat/pages/chat_details/chat_details.dart';
 import 'package:fluffychat/pages/chat_details/participant_list_item.dart';
 import 'package:fluffychat/pages/settings/settings.dart';
 import 'package:fluffychat/utils/matrix_sdk_extensions/matrix_locals.dart';
+import 'package:fluffychat/utils/personal_room_name.dart';
 import 'package:fluffychat/utils/platform_infos.dart';
 import 'package:fluffychat/utils/verified_room_extension.dart';
 import 'package:fluffychat/widgets/avatar.dart';
@@ -73,7 +74,7 @@ class ChatDetailsView extends StatelessWidget {
             (room.summary.mJoinedMemberCount ?? 0);
         final canRequestMoreMembers = members.length < actualMembersCount;
         final iconColor = theme.textTheme.bodyLarge!.color;
-        final displayname = room.getLocalizedDisplayname(
+        final displayname = room.getEffectiveDisplayname(
           MatrixLocals(L10n.of(context)),
         );
         return Scaffold(
@@ -209,14 +210,16 @@ class ChatDetailsView extends StatelessWidget {
                           child: Center(
                             child: TextButton.icon(
                               onPressed:
-                                  room.isDirectChat ||
+                                  room.personalName != null ||
+                                      room.isDirectChat ||
                                       !room.canChangeStateEvent(
                                         EventTypes.RoomName,
                                       )
                                   ? null
                                   : controller.setDisplaynameAction,
                               icon:
-                                  room.isDirectChat ||
+                                  room.personalName != null ||
+                                      room.isDirectChat ||
                                       !room.canChangeStateEvent(
                                         EventTypes.RoomName,
                                       )
@@ -255,6 +258,55 @@ class ChatDetailsView extends StatelessWidget {
                             ),
                           ),
                         ),
+                        if (room.personalName != null)
+                          ListTile(
+                            title: Text(L10n.of(context).personalNameRoomName),
+                            subtitle: Text(
+                              room.getLocalizedDisplayname(
+                                MatrixLocals(L10n.of(context)),
+                              ),
+                            ),
+                            trailing:
+                                !room.isDirectChat &&
+                                    room.canChangeStateEvent(
+                                      EventTypes.RoomName,
+                                    )
+                                ? IconButton(
+                                    tooltip: L10n.of(
+                                      context,
+                                    ).changeTheNameOfTheGroup,
+                                    icon: const Icon(Icons.edit_outlined),
+                                    onPressed: controller.setDisplaynameAction,
+                                  )
+                                : null,
+                          ),
+                        if (room.canSetPersonalName)
+                          ListTile(
+                            leading: const Icon(Icons.edit_note_outlined),
+                            title: Text(L10n.of(context).nameForYou),
+                            subtitle: Text(
+                              controller.personalNamePending
+                                  ? L10n.of(context).personalNamePending
+                                  : room.personalName ??
+                                        L10n.of(context).personalNameUnset,
+                            ),
+                            onTap:
+                                controller.personalNameSaving ||
+                                    controller.personalNamePending
+                                ? null
+                                : controller.setPersonalNameAction,
+                            trailing: room.personalName == null
+                                ? null
+                                : IconButton(
+                                    tooltip: L10n.of(context).resetPersonalName,
+                                    icon: const Icon(Icons.restart_alt),
+                                    onPressed:
+                                        controller.personalNameSaving ||
+                                            controller.personalNamePending
+                                        ? null
+                                        : controller.resetPersonalNameAction,
+                                  ),
+                          ),
                         StreamBuilder(
                           stream: room.client.onSync.stream.where(
                             (s) =>

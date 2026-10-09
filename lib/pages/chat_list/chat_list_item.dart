@@ -9,6 +9,7 @@ import 'package:fluffychat/pages/chat_list/active_call_indicator.dart';
 import 'package:fluffychat/pages/chat_list/unread_bubble.dart';
 import 'package:fluffychat/utils/matrix_live_kit_calls/matrix_live_kit_call.dart';
 import 'package:fluffychat/utils/matrix_sdk_extensions/matrix_locals.dart';
+import 'package:fluffychat/utils/personal_room_name.dart';
 import 'package:fluffychat/utils/room_status_extension.dart';
 import 'package:fluffychat/widgets/hover_builder.dart';
 import 'package:fluffychat/widgets/typing_animation.dart';
@@ -53,11 +54,12 @@ class ChatListItem extends StatelessWidget {
     final backgroundColor = activeChat
         ? theme.colorScheme.secondaryContainer
         : null;
-    final displayname = room.getLocalizedDisplayname(
+    final displayname = room.getEffectiveDisplayname(
       MatrixLocals(L10n.of(context)),
     );
     final filter = this.filter;
-    if (filter != null && !displayname.toLowerCase().contains(filter)) {
+    if (filter != null &&
+        !room.matchesDisplayname(filter, MatrixLocals(L10n.of(context)))) {
       return const SizedBox.shrink();
     }
 
