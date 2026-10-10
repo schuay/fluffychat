@@ -1,6 +1,8 @@
 import java.util.Properties
 import java.io.FileInputStream
 
+val personalRelease = providers.gradleProperty("personalRelease").orNull == "true"
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
@@ -81,7 +83,10 @@ android {
             applicationIdSuffix = ".dev"
         }
         release {
-            signingConfig = signingConfigs.getByName("release")
+            if (personalRelease) {
+                applicationIdSuffix = ".dev"
+            }
+            signingConfig = signingConfigs.getByName(if (personalRelease) "debug" else "release")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
