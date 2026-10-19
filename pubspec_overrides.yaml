@@ -1,0 +1,3 @@
+dependency_overrides:
+  matrix:
+    path: build/matrix-sdk

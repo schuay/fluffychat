@@ -1,0 +1,619 @@
+diff --git a/lib/src/client.dart b/lib/src/client.dart
+index cfb5e24..9a40d33 100644
+--- a/lib/src/client.dart
++++ b/lib/src/client.dart
+@@ -353,24 +353,19 @@ class Client extends MatrixApi {
+       ),
+     };
+ 
+-    accessToken = tokenResponse.accessToken;
+     final expiresIn = tokenResponse.expiresIn;
+     final tokenExpiresAt = expiresIn == null
+         ? null
+         : DateTime.now().add(expiresIn);
+-    _accessTokenExpiresAt = tokenExpiresAt;
+-    await database.updateClient(
+-      homeserverUrl,
++    final updated = await database.updateClientTokens(
++      refreshToken,
+       tokenResponse.accessToken,
+       tokenExpiresAt,
+       tokenResponse.refreshToken,
+-      userId,
+-      deviceId,
+-      deviceName,
+-      prevBatch,
+-      encryption?.pickledOlmAccount,
+-      oidcClientId,
+     );
++    if (!updated) throw StateError('Session changed during token refresh');
++    accessToken = tokenResponse.accessToken;
++    _accessTokenExpiresAt = tokenExpiresAt;
+   }
+ 
+   /// The required name for this client.
+diff --git a/lib/src/database/database_api.dart b/lib/src/database/database_api.dart
+index 86c26b5..290c6fe 100644
+--- a/lib/src/database/database_api.dart
++++ b/lib/src/database/database_api.dart
+@@ -18,6 +18,13 @@ abstract class DatabaseApi {
+ 
+   Future<Map<String, dynamic>?> getClient(String name);
+ 
++  Future<bool> updateClientTokens(
++    String expectedRefreshToken,
++    String token,
++    DateTime? tokenExpiresAt,
++    String? refreshToken,
++  );
++
+   Future updateClient(
+     String homeserverUrl,
+     String token,
+diff --git a/lib/src/database/indexeddb_box.dart b/lib/src/database/indexeddb_box.dart
+index fd2b050..941dfbb 100644
+--- a/lib/src/database/indexeddb_box.dart
++++ b/lib/src/database/indexeddb_box.dart
+@@ -301,6 +301,59 @@ class Box<V> {
+     return list;
+   }
+ 
++  Future<bool> putAllIf(
++    String expectedKey,
++    V expectedValue,
++    Map<String, V?> values,
++  ) async {
++    var updated = false;
++    await boxCollection.zoneTransaction(() async {
++      if (boxCollection._txnCache != null) {
++        throw StateError(
++          'Conditional box update inside a deferred transaction',
++        );
++      }
++      try {
++        final completed = Completer<void>();
++        Object? callbackError;
++        StackTrace? callbackStack;
++        final txn = boxCollection._db.transaction(name.toJS, 'readwrite');
++        txn.onabort = (Event event) {
++          completed.completeError(
++            callbackError ?? StateError('Conditional box update aborted'),
++            callbackStack,
++          );
++        }.toJS;
++        txn.oncomplete = (Event event) {
++          completed.complete();
++        }.toJS;
++        final store = txn.objectStore(name);
++        final request = store.get(expectedKey.toJS);
++        request.onsuccess = (Event event) {
++          try {
++            if (request.result?.dartify() != expectedValue) return;
++            for (final entry in values.entries) {
++              if (entry.value == null) {
++                store.delete(entry.key.toJS);
++              } else {
++                store.put(entry.value.jsify(), entry.key.toJS);
++              }
++            }
++            updated = true;
++          } catch (e, s) {
++            callbackError = e;
++            callbackStack = s;
++            txn.abort();
++          }
++        }.toJS;
++        await completed.future;
++      } finally {
++        clearQuickAccessCache();
++      }
++    });
++    return updated;
++  }
++
+   Future<void> put(String key, V val, [IDBTransaction? txn]) async {
+     if (boxCollection._txnCache != null) {
+       boxCollection._txnCache!.add((txn) => put(key, val, txn));
+diff --git a/lib/src/database/matrix_sdk_database.dart b/lib/src/database/matrix_sdk_database.dart
+index 3cb92af..0b2b2d1 100644
+--- a/lib/src/database/matrix_sdk_database.dart
++++ b/lib/src/database/matrix_sdk_database.dart
+@@ -1298,6 +1298,18 @@ class MatrixSdkDatabase extends DatabaseApi with DatabaseFileStorage {
+   Future<void> transaction(Future<void> Function() action) =>
+       _collection.transaction(action);
+ 
++  @override
++  Future<bool> updateClientTokens(
++    String expectedRefreshToken,
++    String token,
++    DateTime? tokenExpiresAt,
++    String? refreshToken,
++  ) => _clientBox.putAllIf('refresh_token', expectedRefreshToken, {
++    'token': token,
++    'token_expires_at': tokenExpiresAt?.millisecondsSinceEpoch.toString(),
++    'refresh_token': refreshToken,
++  });
++
+   @override
+   Future<void> updateClient(
+     String homeserverUrl,
+diff --git a/lib/src/database/sqflite_box.dart b/lib/src/database/sqflite_box.dart
+index e939b7b..9453ea5 100644
+--- a/lib/src/database/sqflite_box.dart
++++ b/lib/src/database/sqflite_box.dart
+@@ -228,6 +228,50 @@ class Box<V> {
+     return list;
+   }
+ 
++  Future<bool> putAllIf(
++    String expectedKey,
++    V expectedValue,
++    Map<String, V?> values,
++  ) async {
++    var updated = false;
++    await boxCollection.zoneTransaction(() async {
++      if (boxCollection._activeBatch != null) {
++        throw StateError(
++          'Conditional box update inside a deferred transaction',
++        );
++      }
++      try {
++        updated = await boxCollection._db.transaction((txn) async {
++          final rows = await txn.query(
++            name,
++            columns: ['v'],
++            where: 'k = ?',
++            whereArgs: [expectedKey],
++          );
++          if (rows.isEmpty || rows.single['v'] != _toString(expectedValue)) {
++            return false;
++          }
++          final batch = txn.batch();
++          for (final entry in values.entries) {
++            if (entry.value == null) {
++              batch.delete(name, where: 'k = ?', whereArgs: [entry.key]);
++            } else {
++              batch.insert(name, {
++                'k': entry.key,
++                'v': _toString(entry.value),
++              }, conflictAlgorithm: ConflictAlgorithm.replace);
++            }
++          }
++          await batch.commit(noResult: true);
++          return true;
++        });
++      } finally {
++        clearQuickAccessCache();
++      }
++    });
++    return updated;
++  }
++
+   Future<void> put(String key, V val) async {
+     final txn = boxCollection._activeBatch;
+ 
+diff --git a/test/box_test.dart b/test/box_test.dart
+index 497c33e..6512b99 100644
+--- a/test/box_test.dart
++++ b/test/box_test.dart
+@@ -2,11 +2,23 @@
+ //
+ // SPDX-License-Identifier: AGPL-3.0-or-later
+ 
++import 'dart:collection';
++
+ import 'package:matrix/src/database/sqflite_box.dart'
+     if (dart.library.js_interop) 'package:matrix/src/database/indexeddb_box.dart';
+ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+ import 'package:test/test.dart';
+ 
++class FailingValues extends MapView<String, String?> {
++  FailingValues() : super(const {});
++
++  @override
++  Iterable<MapEntry<String, String?>> get entries sync* {
++    yield const MapEntry('token', 'partial');
++    throw StateError('Injected write failure');
++  }
++}
++
+ void main() {
+   group('Box tests', () {
+     late BoxCollection collection;
+@@ -42,6 +54,69 @@ void main() {
+       await box.clear();
+     });
+ 
++    test(
++      'Box.putAllIf changes only requested values and deletes nulls',
++      () async {
++        final box = collection.openBox<String>('cats');
++        await box.put('refresh', 'old');
++        await box.put('token', 'old-token');
++        await box.put('expiry', '123');
++        await box.put('identity', 'keep');
++        expect(
++          await box.putAllIf('refresh', 'old', {
++            'refresh': 'new',
++            'token': 'new-token',
++            'expiry': null,
++          }),
++          isTrue,
++        );
++        expect(await box.getAllValues(), {
++          'refresh': 'new',
++          'token': 'new-token',
++          'identity': 'keep',
++        });
++        await box.clear();
++      },
++    );
++
++    test('Box.putAllIf bypasses cached values on mismatch', () async {
++      final box = collection.openBox<String>('cats');
++      final other = collection.openBox<String>('cats');
++      await box.put('refresh', 'old');
++      expect(await box.get('refresh'), 'old');
++      await other.put('refresh', 'new');
++      expect(await box.putAllIf('refresh', 'old', {'token': 'stale'}), isFalse);
++      expect(await box.get('refresh'), 'new');
++      expect(await box.get('token'), isNull);
++      await box.clear();
++    });
++
++    test('Box.putAllIf rolls back when a later write fails', () async {
++      final box = collection.openBox<String>('cats');
++      await box.put('refresh', 'old');
++      await box.put('token', 'original');
++      await expectLater(
++        box.putAllIf('refresh', 'old', FailingValues()),
++        throwsStateError,
++      );
++      expect(await box.getAllValues(), {'refresh': 'old', 'token': 'original'});
++      expect(await box.get('token'), 'original');
++      await box.clear();
++    });
++
++    test('Box.putAllIf rejects a deferred outer transaction', () async {
++      final box = collection.openBox<String>('cats');
++      await box.put('refresh', 'old');
++      await collection.transaction(() async {
++        await expectLater(
++          box.putAllIf('refresh', 'old', {'refresh': 'new'}),
++          throwsStateError,
++        );
++      });
++      expect(await box.get('refresh'), 'old');
++      await box.clear();
++    });
++
+     test('Box.getAllKeys', () async {
+       final box = collection.openBox<Map>('cats');
+       await box.put('fluffy', data);
+diff --git a/test/token_refresh_test.dart b/test/token_refresh_test.dart
+new file mode 100644
+index 0000000..aa8907a
+--- /dev/null
++++ b/test/token_refresh_test.dart
+@@ -0,0 +1,321 @@
++// SPDX-FileCopyrightText: 2026 Contributors to FluffyChat
++//
++// SPDX-License-Identifier: AGPL-3.0-or-later
++
++import 'dart:async';
++import 'dart:convert';
++import 'dart:io';
++
++import 'package:http/http.dart' as http;
++import 'package:matrix/encryption/utils/pickle_key.dart';
++import 'package:matrix/matrix.dart';
++import 'package:sqflite_common_ffi/sqflite_ffi.dart';
++import 'package:test/test.dart';
++import 'package:vodozemac/vodozemac.dart' as vod;
++
++import 'fake_client.dart';
++import 'fake_database.dart';
++
++class DelayedRefreshApi extends FakeMatrixApi {
++  final started = Completer<void>();
++  final finish = Completer<void>();
++  bool delayRefresh = false;
++  bool rejectReadMarker = false;
++  int deviceKeyUploads = 0;
++
++  @override
++  Future<http.Response> mockIntercept(http.Request request) async {
++    if (rejectReadMarker && request.url.path.endsWith('/read_markers')) {
++      return http.Response(
++        jsonEncode({
++          'errcode': 'M_UNKNOWN_TOKEN',
++          'error': 'Access token has expired',
++          'soft_logout': true,
++        }),
++        401,
++      );
++    }
++    if (delayRefresh && request.url.path.endsWith('/refresh')) {
++      started.complete();
++      await finish.future;
++    }
++    if (request.url.path.endsWith('/keys/upload') &&
++        jsonDecode(request.body)['device_keys'] != null) {
++      deviceKeyUploads++;
++    }
++    return super.mockIntercept(request);
++  }
++}
++
++Future<Client> prepare(DelayedRefreshApi api) async {
++  final seed = await getClient();
++  await seed.dispose(closeDatabase: false);
++  final client = Client(
++    seed.clientName,
++    database: seed.database,
++    httpClient: api,
++    onSoftLogout: (c) => c.refreshAccessToken(),
++  );
++  FakeMatrixApi.currentApi = api;
++  FakeMatrixApi.client = client;
++  await client.init(waitForFirstSync: false);
++  await client.abortSync();
++  expect(client.encryption?.pickledOlmAccount, isNotNull);
++  return client;
++}
++
++Map<String, dynamic> sessionFields(Map<String, dynamic> record) =>
++    Map<String, dynamic>.from(record)
++      ..remove('token')
++      ..remove('token_expires_at')
++      ..remove('refresh_token');
++
++void main() {
++  group('token persistence across database connections', () {
++    late DatabaseApi first;
++    late DatabaseApi second;
++    setUp(() async {
++      final directory = await Directory.systemTemp.createTemp('matrix-tokens-');
++      first = await getDatabase(
++        databasePath: '${directory.path}/client.sqlite',
++      );
++      second = await getDatabase(
++        databasePath: '${directory.path}/client.sqlite',
++      );
++      addTearDown(() async {
++        await first.close();
++        await second.close();
++        await directory.delete(recursive: true);
++      });
++      await first.insertClient(
++        'test',
++        'https://example.invalid',
++        'T0',
++        null,
++        'R0',
++        '@test:example.invalid',
++        'device',
++        null,
++        null,
++        'identity',
++        null,
++      );
++    });
++
++    for (final clearSession in [false, true]) {
++      test(
++        'rejects stale refresh after external change (clear: $clearSession)',
++        () async {
++          expect(
++            await first.updateClientTokens('R0', 'T1', null, 'R1'),
++            isTrue,
++          );
++          if (clearSession) {
++            await second.clear();
++          } else {
++            expect(
++              await second.updateClientTokens('R1', 'T2', null, 'R2'),
++              isTrue,
++            );
++          }
++          expect(
++            await first.updateClientTokens('R1', 'stale', null, 'stale'),
++            isFalse,
++          );
++          final stored = await first.getClient('test');
++          if (clearSession) {
++            expect(stored, isNull);
++          } else {
++            expect(stored!['token'], 'T2');
++            expect(stored['refresh_token'], 'R2');
++            expect(stored['olm_account'], 'identity');
++          }
++        },
++      );
++    }
++
++    test('only one concurrent rotation succeeds', () async {
++      final early = DateTime.fromMillisecondsSinceEpoch(1000);
++      final late = DateTime.fromMillisecondsSinceEpoch(2000);
++      Future<bool?> attempt(
++        DatabaseApi db,
++        String suffix,
++        DateTime expiry,
++      ) async {
++        try {
++          return await db.updateClientTokens(
++            'R0',
++            'T$suffix',
++            expiry,
++            'R$suffix',
++          );
++        } on DatabaseException catch (e) {
++          if (e.getResultCode() == 5) return null;
++          rethrow;
++        }
++      }
++
++      final results = await Future.wait([
++        attempt(first, '1', early),
++        attempt(second, '2', late),
++      ]);
++      expect(results.where((updated) => updated == true), hasLength(1));
++      final winner = results.first == true ? '1' : '2';
++      final stored = (await first.getClient('test'))!;
++      expect(stored['token'], 'T$winner');
++      expect(stored['refresh_token'], 'R$winner');
++      expect(stored['token_expires_at'], '${winner}000');
++      final loser = results.first == true ? second : first;
++      expect(
++        await loser.updateClientTokens('R0', 'stale', null, 'stale'),
++        isFalse,
++      );
++    });
++
++    test(
++      'clears absent expiry and refresh token without changing identity',
++      () async {
++        expect(
++          await first.updateClientTokens('R0', 'T1', DateTime.now(), 'R1'),
++          isTrue,
++        );
++        expect(await first.updateClientTokens('R1', 'T2', null, null), isTrue);
++        final stored = (await first.getClient('test'))!;
++        expect(stored.containsKey('token_expires_at'), isFalse);
++        expect(stored.containsKey('refresh_token'), isFalse);
++        expect(stored['token'], 'T2');
++        expect(stored['olm_account'], 'identity');
++      },
++    );
++  });
++
++  group('token refresh', tags: 'olm', () {
++    test('updates only tokens during normal refresh', () async {
++      final client = await prepare(DelayedRefreshApi());
++      addTearDown(client.dispose);
++      final before = (await client.database.getClient(client.clientName))!;
++      await client.refreshAccessToken();
++      final after = (await client.database.getClient(client.clientName))!;
++      expect(after['token'], 'a_new_token');
++      expect(after['refresh_token'], 'another_new_token');
++      expect(client.accessToken, 'a_new_token');
++      expect(client.accessTokenExpiresAt, isNotNull);
++      expect(sessionFields(after), sessionFields(before));
++    });
++
++    for (final newerKeys in [false, true]) {
++      test(
++        'preserves stored account after disposal (newer keys: $newerKeys)',
++        () async {
++          final api = DelayedRefreshApi();
++          final client = await prepare(api);
++          addTearDown(client.database.close);
++          api.delayRefresh = true;
++          final refresh = client.refreshAccessToken();
++          await api.started.future;
++          if (newerKeys) {
++            final account = vod.Account.fromPickleEncrypted(
++              pickle: client.encryption!.pickledOlmAccount!,
++              pickleKey: client.userID!.toPickleKey(),
++            );
++            account.generateOneTimeKeys(1);
++            await client.database.updateClientKeys(
++              account.toPickleEncrypted(client.userID!.toPickleKey()),
++            );
++          }
++          final before = (await client.database.getClient(client.clientName))!;
++          await client.dispose(closeDatabase: false);
++          expect(client.encryption, isNull);
++          api.finish.complete();
++          await refresh;
++          final after = (await client.database.getClient(client.clientName))!;
++          expect(after['token'], 'a_new_token');
++          expect(sessionFields(after), sessionFields(before));
++        },
++      );
++    }
++
++    test('does not recreate a cleared session', () async {
++      final api = DelayedRefreshApi();
++      final client = await prepare(api);
++      addTearDown(client.dispose);
++      api.delayRefresh = true;
++      final refresh = client.refreshAccessToken();
++      await api.started.future;
++      await client.clear(reason: SessionClearReason.logout);
++      final rejected = expectLater(refresh, throwsStateError);
++      api.finish.complete();
++      await rejected;
++      expect(await client.database.getClient(client.clientName), isNull);
++      expect(client.accessToken, isNull);
++    });
++
++    test(
++      'notification failure during refresh preserves identity on restart',
++      () async {
++        final api = DelayedRefreshApi();
++        final seed = await prepare(api);
++        final stored = (await seed.database.getClient(seed.clientName))!;
++        await seed.database.updateClient(
++          seed.homeserver.toString(),
++          seed.accessToken!,
++          DateTime.now().subtract(const Duration(minutes: 1)),
++          stored['refresh_token'],
++          seed.userID!,
++          seed.deviceID,
++          seed.deviceName,
++          seed.prevBatch,
++          seed.encryption!.pickledOlmAccount,
++          null,
++        );
++        final before = (await seed.database.getClient(seed.clientName))!;
++        final identityKey = seed.identityKey;
++        await seed.dispose(closeDatabase: false);
++        final background = Client(
++          seed.clientName,
++          database: seed.database,
++          httpClient: api,
++          onSoftLogout: (c) => c.refreshAccessToken(),
++        );
++        FakeMatrixApi.client = background;
++        api.delayRefresh = true;
++        api.rejectReadMarker = true;
++        await background.init(
++          waitForFirstSync: false,
++          waitUntilLoadCompletedLoaded: false,
++        );
++        await api.started.future;
++        try {
++          await expectLater(
++            background.setReadMarker(
++              '!room:example.com',
++              mFullyRead: r'$event',
++            ),
++            throwsA(isA<MatrixException>()),
++          );
++        } finally {
++          await background.dispose(closeDatabase: false);
++        }
++        final completed = background.onLoginStateChanged.stream.firstWhere(
++          (state) => state == LoginState.loggedIn,
++        );
++        api.finish.complete();
++        await completed;
++        final after = (await background.database.getClient(seed.clientName))!;
++        expect(after['token'], 'a_new_token');
++        expect(sessionFields(after), sessionFields(before));
++        final restarted = Client(
++          seed.clientName,
++          database: seed.database,
++          httpClient: api,
++        );
++        addTearDown(restarted.dispose);
++        FakeMatrixApi.client = restarted;
++        await restarted.init(waitForFirstSync: false);
++        expect(restarted.isLogged(), isTrue);
++        expect(restarted.identityKey, identityKey);
++        expect(api.deviceKeyUploads, 0);
++      },
++    );
++  });
++}
