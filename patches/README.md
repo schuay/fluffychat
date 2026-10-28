@@ -30,6 +30,21 @@ dart test test/box_test.dart --platform chrome
 The SDK's native tests require its usual vodozemac and SQLite setup. See its
 `scripts/prepare_vodozemac.sh` and `test/fake_client.dart` for the library path.
 
+# Patched pub.dev packages
+
+`scripts/prepare-pub-packages.sh` downloads pinned pub.dev archives, checks
+their sha256, and applies a patch from this directory into `build/<package>`.
+`pubspec_overrides.yaml` selects the results. Both patches fix Android builds
+against `compileSdk = 37`:
+
+- `flutter-vodozemac-compile-sdk.patch`: cargokit parses `compileSdkVersion`
+  (`android-37.0`) as an integer; read `compileSdk` instead.
+- `flutter-shortcuts-new-compile-sdk.patch`: compile against 36; its AndroidX
+  dependencies require at least 34.
+
+Run `flutter pub get` after changing `pubspec_overrides.yaml`; `flutter build`
+does not re-resolve on its own.
+
 For the personal Android release, use the existing Android SDK and the personal
 signing key:
 

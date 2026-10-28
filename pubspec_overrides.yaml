@@ -1,3 +1,7 @@
 dependency_overrides:
   matrix:
     path: build/matrix-sdk
+  flutter_vodozemac:
+    path: build/flutter-vodozemac
+  flutter_shortcuts_new:
+    path: build/flutter-shortcuts-new

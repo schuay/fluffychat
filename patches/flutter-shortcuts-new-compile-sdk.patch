@@ -1,0 +1,11 @@
+--- a/android/build.gradle
++++ b/android/build.gradle
+@@ -22,7 +22,7 @@
+ apply plugin: 'com.android.library'
+ 
+ android {
+-    compileSdkVersion 31
++    compileSdkVersion 36
+ 
+     defaultConfig {
+         minSdkVersion 16
