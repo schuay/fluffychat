@@ -30,13 +30,17 @@ dart test test/box_test.dart --platform chrome
 The SDK's native tests require its usual vodozemac and SQLite setup. See its
 `scripts/prepare_vodozemac.sh` and `test/fake_client.dart` for the library path.
 
-For the personal Android release, use the existing Android SDK and signing key:
+For the personal Android release, use the existing Android SDK and the personal
+signing key:
 
 ```bash
 ORG_GRADLE_PROJECT_personalRelease=true \
+ORG_GRADLE_PROJECT_personalKeystore=/path/to/keystore.p12 \
+ORG_GRADLE_PROJECT_personalKeyAlias=<alias> \
+ORG_GRADLE_PROJECT_personalKeyPasswordFile=/path/to/password-file \
   flutter build apk --release --target-platform android-arm64
 ```
 
-This retains `chat.fluffy.fluffychat.dev` and debug-key signing for an in-place
-update of the personal installation. Install with `adb install -r`; do not
-uninstall or clear data.
+This builds `cx.linke.fluffychat`. The password file holds the keystore
+password, which is also used as the key password. Every build must use the same
+key, or installed copies cannot update in place.

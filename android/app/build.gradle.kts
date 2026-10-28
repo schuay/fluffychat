@@ -53,6 +53,15 @@ android {
             storeFile = file("dummy.keystore")
             storePassword = "dummyStorePassword"
         }
+        if (personalRelease) {
+            create("personal") {
+                val password = file(providers.gradleProperty("personalKeyPasswordFile").get()).readText().trim()
+                storeFile = file(providers.gradleProperty("personalKeystore").get())
+                storePassword = password
+                keyAlias = providers.gradleProperty("personalKeyAlias").get()
+                keyPassword = password
+            }
+        }
     }
 
     val keystoreProperties = Properties()
@@ -68,7 +77,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "chat.fluffy.fluffychat"
+        applicationId = if (personalRelease) "cx.linke.fluffychat" else "chat.fluffy.fluffychat"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
@@ -83,10 +92,7 @@ android {
             applicationIdSuffix = ".dev"
         }
         release {
-            if (personalRelease) {
-                applicationIdSuffix = ".dev"
-            }
-            signingConfig = signingConfigs.getByName(if (personalRelease) "debug" else "release")
+            signingConfig = signingConfigs.getByName(if (personalRelease) "personal" else "release")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
