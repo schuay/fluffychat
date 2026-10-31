@@ -45,16 +45,24 @@ against `compileSdk = 37`:
 Run `flutter pub get` after changing `pubspec_overrides.yaml`; `flutter build`
 does not re-resolve on its own.
 
-For the personal Android release, use the existing Android SDK and the personal
-signing key:
+# Personal Android release
+
+The toolchain (Flutter, JDK, Android SDK, rustup) is a Nix devShell kept
+outside this tree. Its shell keeps a writable Flutter SDK tree and the Rust
+toolchain under `$FLUFFYCHAT_STATE_DIR` (default `~/.local/state/fluffychat`).
+Inside it, build with the personal signing key:
 
 ```bash
+scripts/prepare-pub-packages.sh && flutter pub get &&
 ORG_GRADLE_PROJECT_personalRelease=true \
 ORG_GRADLE_PROJECT_personalKeystore=/path/to/keystore.p12 \
 ORG_GRADLE_PROJECT_personalKeyAlias=<alias> \
 ORG_GRADLE_PROJECT_personalKeyPasswordFile=/path/to/password-file \
   flutter build apk --release --target-platform android-arm64
 ```
+
+The Rust version is not pinned: cargokit installs rustup's current `stable`
+on first use.
 
 This builds `cx.linke.fluffychat`. The password file holds the keystore
 password, which is also used as the key password. Every build must use the same
