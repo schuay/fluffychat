@@ -1,5 +1,5 @@
 diff --git a/lib/src/client.dart b/lib/src/client.dart
-index cfb5e24..9a40d33 100644
+index 333d9c11..23b8c1c7 100644
 --- a/lib/src/client.dart
 +++ b/lib/src/client.dart
 @@ -353,24 +353,19 @@ class Client extends MatrixApi {
@@ -12,19 +12,22 @@ index cfb5e24..9a40d33 100644
          ? null
          : DateTime.now().add(expiresIn);
 -    _accessTokenExpiresAt = tokenExpiresAt;
--    await database.updateClient(
--      homeserverUrl,
+-    await database.storeClient(
+-      homeserverUrl: homeserverUrl,
+-      token: tokenResponse.accessToken,
+-      tokenExpiresAt: tokenExpiresAt,
+-      refreshToken: tokenResponse.refreshToken,
+-      userId: userId,
+-      deviceId: deviceId,
+-      deviceName: deviceName,
+-      prevBatch: prevBatch,
+-      olmAccount: encryption?.pickledOlmAccount,
+-      oidcClientId: oidcClientId,
 +    final updated = await database.updateClientTokens(
 +      refreshToken,
-       tokenResponse.accessToken,
-       tokenExpiresAt,
-       tokenResponse.refreshToken,
--      userId,
--      deviceId,
--      deviceName,
--      prevBatch,
--      encryption?.pickledOlmAccount,
--      oidcClientId,
++      tokenResponse.accessToken,
++      tokenExpiresAt,
++      tokenResponse.refreshToken,
      );
 +    if (!updated) throw StateError('Session changed during token refresh');
 +    accessToken = tokenResponse.accessToken;
@@ -33,12 +36,12 @@ index cfb5e24..9a40d33 100644
  
    /// The required name for this client.
 diff --git a/lib/src/database/database_api.dart b/lib/src/database/database_api.dart
-index 86c26b5..290c6fe 100644
+index c60fa93b..2f70b3ba 100644
 --- a/lib/src/database/database_api.dart
 +++ b/lib/src/database/database_api.dart
-@@ -18,6 +18,13 @@ abstract class DatabaseApi {
- 
-   Future<Map<String, dynamic>?> getClient(String name);
+@@ -31,6 +31,13 @@ abstract class DatabaseApi {
+     String? oidcClientId,
+   });
  
 +  Future<bool> updateClientTokens(
 +    String expectedRefreshToken,
@@ -47,14 +50,14 @@ index 86c26b5..290c6fe 100644
 +    String? refreshToken,
 +  );
 +
+   @Deprecated('Use storeClient() instead.')
    Future updateClient(
      String homeserverUrl,
-     String token,
 diff --git a/lib/src/database/indexeddb_box.dart b/lib/src/database/indexeddb_box.dart
-index fd2b050..941dfbb 100644
+index 7abc1ff2..f302ddeb 100644
 --- a/lib/src/database/indexeddb_box.dart
 +++ b/lib/src/database/indexeddb_box.dart
-@@ -301,6 +301,59 @@ class Box<V> {
+@@ -300,6 +300,59 @@ class Box<V> {
      return list;
    }
  
@@ -115,10 +118,10 @@ index fd2b050..941dfbb 100644
      if (boxCollection._txnCache != null) {
        boxCollection._txnCache!.add((txn) => put(key, val, txn));
 diff --git a/lib/src/database/matrix_sdk_database.dart b/lib/src/database/matrix_sdk_database.dart
-index 3cb92af..0b2b2d1 100644
+index b348f2b8..8e714108 100644
 --- a/lib/src/database/matrix_sdk_database.dart
 +++ b/lib/src/database/matrix_sdk_database.dart
-@@ -1298,6 +1298,18 @@ class MatrixSdkDatabase extends DatabaseApi with DatabaseFileStorage {
+@@ -1384,6 +1384,50 @@ class MatrixSdkDatabase extends DatabaseApi with DatabaseFileStorage {
    Future<void> transaction(Future<void> Function() action) =>
        _collection.transaction(action);
  
@@ -128,20 +131,52 @@ index 3cb92af..0b2b2d1 100644
 +    String token,
 +    DateTime? tokenExpiresAt,
 +    String? refreshToken,
-+  ) => _clientBox.putAllIf('refresh_token', expectedRefreshToken, {
-+    'token': token,
-+    'token_expires_at': tokenExpiresAt?.millisecondsSinceEpoch.toString(),
-+    'refresh_token': refreshToken,
-+  });
++  ) async {
++    final expiresAt = tokenExpiresAt?.millisecondsSinceEpoch.toString();
++    final updated = await _clientBox.putAllIf(
++      'refresh_token',
++      expectedRefreshToken,
++      {
++        'token': token,
++        'token_expires_at': expiresAt,
++        'refresh_token': refreshToken,
++      },
++    );
++    if (!updated) return false;
++    // getClient() lets the secure storage copy override the box, so the
++    // tokens there must follow the box.
++    final secureStorage = this.secureStorage;
++    if (secureStorage != null) {
++      final clientData = await _readSecureStorageClientData();
++      if (clientData != null) {
++        clientData['token'] = token;
++        if (expiresAt == null) {
++          clientData.remove('token_expires_at');
++        } else {
++          clientData['token_expires_at'] = expiresAt;
++        }
++        if (refreshToken == null) {
++          clientData.remove('refresh_token');
++        } else {
++          clientData['refresh_token'] = refreshToken;
++        }
++        await secureStorage.write(
++          _secureStorageClientDataKey,
++          jsonEncode(clientData),
++        );
++      }
++    }
++    return true;
++  }
 +
    @override
-   Future<void> updateClient(
-     String homeserverUrl,
+   Future<void> updateClientKeys(String olmAccount) async {
+     final secureStorage = this.secureStorage;
 diff --git a/lib/src/database/sqflite_box.dart b/lib/src/database/sqflite_box.dart
-index e939b7b..9453ea5 100644
+index 89cd628b..cce26b95 100644
 --- a/lib/src/database/sqflite_box.dart
 +++ b/lib/src/database/sqflite_box.dart
-@@ -228,6 +228,50 @@ class Box<V> {
+@@ -227,6 +227,50 @@ class Box<V> {
      return list;
    }
  
@@ -193,7 +228,7 @@ index e939b7b..9453ea5 100644
      final txn = boxCollection._activeBatch;
  
 diff --git a/test/box_test.dart b/test/box_test.dart
-index 497c33e..6512b99 100644
+index 497c33e4..6512b991 100644
 --- a/test/box_test.dart
 +++ b/test/box_test.dart
 @@ -2,11 +2,23 @@
@@ -292,7 +327,7 @@ index 497c33e..6512b99 100644
        await box.put('fluffy', data);
 diff --git a/test/token_refresh_test.dart b/test/token_refresh_test.dart
 new file mode 100644
-index 0000000..aa8907a
+index 00000000..aa8907a1
 --- /dev/null
 +++ b/test/token_refresh_test.dart
 @@ -0,0 +1,321 @@

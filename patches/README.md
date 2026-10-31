@@ -1,7 +1,7 @@
 # Matrix SDK token refresh patch
 
 This personal build applies `matrix-sdk-token-refresh.patch` to Matrix SDK
-commit `466a60792159b22530e9c043585545ee2e766d0b` (14.0.0).
+commit `b325fb82049b9ad656682e59f57bd1b31ba33813` (14.1.0).
 `pubspec_overrides.yaml` selects the generated `build/matrix-sdk` directory.
 Prepare it before dependency resolution in a fresh checkout:
 
@@ -17,7 +17,9 @@ generated directory unless the same patch is already present.
 Token refresh updates only the access token, expiry, and refresh token. It does
 not rewrite encryption identity or sync state. The update checks the expected
 refresh token inside a real SQLite/IndexedDB transaction so a delayed response
-cannot overwrite a rotated or cleared session.
+cannot overwrite a rotated or cleared session. Since 14.1.0 the SDK also keeps
+the client data in secure storage, which `getClient()` lets override the box;
+after a successful conditional update the tokens there are rewritten too.
 
 The patch includes native token-refresh regression tests and shared box tests.
 In the prepared SDK, run:
@@ -27,8 +29,11 @@ dart test test/token_refresh_test.dart test/box_test.dart
 dart test test/box_test.dart --platform chrome
 ```
 
-The SDK's native tests require its usual vodozemac and SQLite setup. See its
-`scripts/prepare_vodozemac.sh` and `test/fake_client.dart` for the library path.
+The SDK's native tests need the vodozemac library under `rust/target/debug/`
+(see `test/fake_client.dart`): clone `famedly/dart-vodozemac` at the version
+from the SDK's `pubspec.yaml`, move its `rust/` into the SDK tree and run
+`cargo build` there. Without it the token refresh tests fail at the first
+`pickledOlmAccount` check.
 
 # Patched pub.dev packages
 
