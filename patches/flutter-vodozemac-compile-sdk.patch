@@ -9,3 +9,17 @@
                      targetPlatforms = platforms
                      pluginFile = CargoKitPlugin.file
                  }
+--- a/cargokit/run_build_tool.sh
++++ b/cargokit/run_build_tool.sh
+@@ -12,7 +12,10 @@
+ # from Cargokit. This is done to ensure that we don't pollute Cargokit folder
+ # with .dart_tool contents.
+ 
+-BUILD_TOOL_PKG_DIR="$BASEDIR/build_tool"
++# Resolve the path: the cache key below hashes a listing of this directory
++# that contains the path as spelled, and the script runs under different
++# spellings (Gradle's gradle/.., rustc's linker setting).
++BUILD_TOOL_PKG_DIR=$(cd "$BASEDIR/build_tool" && pwd -P)
+ 
+ if [[ -z $FLUTTER_ROOT ]]; then # not defined
+   DART=dart

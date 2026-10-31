@@ -43,7 +43,10 @@ their sha256, and applies a patch from this directory into `build/<package>`.
 against `compileSdk = 37`:
 
 - `flutter-vodozemac-compile-sdk.patch`: cargokit parses `compileSdkVersion`
-  (`android-37.0`) as an integer; read `compileSdk` instead.
+  (`android-37.0`) as an integer; read `compileSdk` instead. Also resolves
+  the build tool directory in `run_build_tool.sh`: its cache key hashes a
+  listing containing the path as spelled, and Gradle and rustc's linker
+  setting spell it differently, so every other call reran `pub get`.
 - `flutter-shortcuts-new-compile-sdk.patch`: compile against 36; its AndroidX
   dependencies require at least 34.
 
